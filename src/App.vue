@@ -1,33 +1,38 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 
+// 主题状态管理
 const isDark = ref(false)
 
+// 切换深色/浅色主题
 const toggleTheme = () => {
   isDark.value = !isDark.value
 }
 
-const monthlyKWh = ref(133380)
-const superPeakRate = ref(11.46)
-const peakRate = ref(7.11)
-const unitCapacityKWh = ref(261)
-const efficiency = ref(88)
-const priceDiff = ref(0.8)
-const priceDiff2 = ref(0.5)
-const m2Months = ref(0)
-const operatingDays = ref(330)
-const degradationRate = ref(2)
-const revenueShare = ref(80)
+// 用电与套利参数
+const monthlyKWh = ref(133380) // 月用电量(kWh)
+const superPeakRate = ref(11.46) // 尖峰用电占比(%)
+const peakRate = ref(7.11) // 峰用电占比(%)
+const unitCapacityKWh = ref(261) // 单台储能额定容量(kWh)
+const efficiency = ref(88) // 充放电效率(%)
+const priceDiff = ref(0.8) // 一充一放电价差(元/kWh)
+const priceDiff2 = ref(0.5) // 两充两放额外电价差(元/kWh)
+const m2Months = ref(0) // 两充两放模式月份数
+const operatingDays = ref(330) // 年运营天数
+const degradationRate = ref(2) // 年衰减率(%)
+const revenueShare = ref(80) // 投资运营方收益分成比例(%)
 
-const equipmentRatePerWh = ref(0.8)
-const installCostWan = ref(10)
-const designCostWan = ref(5)
-const opexRatePerWh = ref(0.01)
-const loanRatio = ref(0)
-const loanRate = ref(3)
-const loanTerm = ref(10)
-const discountRate = ref(8)
+// 投资与财务参数
+const equipmentRatePerWh = ref(0.8) // 设备单价(元/Wh)
+const installCostWan = ref(10) // 安装成本(万元)
+const designCostWan = ref(5) // 设计成本(万元)
+const opexRatePerWh = ref(0.01) // 年运维成本(元/Wh)
+const loanRatio = ref(0) // 贷款比例(%)
+const loanRate = ref(3) // 贷款利率(%)
+const loanTerm = ref(10) // 贷款期限(年)
+const discountRate = ref(8) // 折现率(%)
 
+// 计算参数预处理：将百分比转换为小数，统一计算单位
 const calcParams = computed(() => ({
   monthlyKWh: monthlyKWh.value,
   superPeakRate: superPeakRate.value / 100,
@@ -50,67 +55,81 @@ const calcParams = computed(() => ({
   discountRate: discountRate.value / 100
 }))
 
+// 核心计算逻辑：计算所有财务指标和投资回报
 const calcResults = computed(() => {
   const p = calcParams.value
   
-  const peakRatio = p.superPeakRate + p.peakRate
-  const dailyPeakKWh = (p.monthlyKWh * peakRatio) / 30
-  const dailyArbitrage = Math.min(dailyPeakKWh, p.unitCapacityKWh * p.efficiency)
-  const requiredUnits = Math.ceil(dailyPeakKWh / (p.unitCapacityKWh * p.efficiency))
-  const unitCount = Math.max(1, requiredUnits)
+  // 计算基础套利数据
+  const peakRatio = p.superPeakRate + p.peakRate // 尖峰+峰时段总占比
+  const dailyPeakKWh = (p.monthlyKWh * peakRatio) / 30 // 日均峰时段用电量
+  const dailyArbitrage = Math.min(dailyPeakKWh, p.unitCapacityKWh * p.efficiency) // 实际可套利电量（受限于储能容量）
+  const requiredUnits = Math.ceil(dailyPeakKWh / (p.unitCapacityKWh * p.efficiency)) // 所需储能台数
+  const unitCount = Math.max(1, requiredUnits) // 至少需要1台
   
-  const m1Months = 12 - p.m2Months
-  const annualArbitrageM1 = dailyArbitrage * p.priceDiff * p.operatingDays * m1Months / 12
-  const annualArbitrageM2 = dailyArbitrage * (p.priceDiff + p.priceDiff2) * p.operatingDays * p.m2Months / 12
-  const grossBefore = (annualArbitrageM1 + annualArbitrageM2) / 10000
+  // 计算年度收益
+  const m1Months = 12 - p.m2Months // 一充一放模式月份数
+  const annualArbitrageM1 = dailyArbitrage * p.priceDiff * p.operatingDays * m1Months / 12 // 一充一放模式年套利电量
+  const annualArbitrageM2 = dailyArbitrage * (p.priceDiff + p.priceDiff2) * p.operatingDays * p.m2Months / 12 // 两充两放模式年套利电量
+  const grossBefore = (annualArbitrageM1 + annualArbitrageM2) / 10000 // 年度总收益（万元）
   
-  const equipmentCost = unitCount * p.unitCapacityKWh * 1000 * p.equipmentRatePerWh / 10000
-  const opexAnnual = unitCount * p.unitCapacityKWh * 1000 * p.opexRatePerWh / 10000
-  const capex = equipmentCost + p.installCostWan + p.designCostWan
+  // 计算投资成本
+  const equipmentCost = unitCount * p.unitCapacityKWh * 1000 * p.equipmentRatePerWh / 10000 // 设备总成本（万元）
+  const opexAnnual = unitCount * p.unitCapacityKWh * 1000 * p.opexRatePerWh / 10000 // 年运维成本（万元）
+  const capex = equipmentCost + p.installCostWan + p.designCostWan // 总投资CAPEX（万元）
   
-  const year1NetA = (grossBefore * p.revenueShare - opexAnnual)
-  const dailyGross = grossBefore * 10000 / p.operatingDays
-  const dailyGrossAfterA = year1NetA * 10000 / p.operatingDays
-  const annualGrossB = grossBefore * (1 - p.revenueShare)
-  const dailyGrossB = annualGrossB * 10000 / p.operatingDays
+  // 计算收益分配
+  const year1NetA = (grossBefore * p.revenueShare - opexAnnual) // 投资运营方首年净收益
+  const dailyGross = grossBefore * 10000 / p.operatingDays // 日均总收益（元）
+  const dailyGrossAfterA = year1NetA * 10000 / p.operatingDays // 投资运营方日均净收益（元）
+  const annualGrossB = grossBefore * (1 - p.revenueShare) // 用能方年度收益
+  const dailyGrossB = annualGrossB * 10000 / p.operatingDays // 用能方日均收益（元）
   
-  const arrRate = year1NetA / capex * 100
+  // 计算投资回报率
+  const arrRate = year1NetA / capex * 100 // 年化回报率
   
+  // 计算静态回收期
   let cumulative = 0
   let paybackYear = 0
   for (let i = 1; i <= 20; i++) {
-    const degradation = Math.pow(1 - p.degradationRate, i - 1)
-    const yearNet = (grossBefore * degradation * p.revenueShare - opexAnnual)
+    const degradation = Math.pow(1 - p.degradationRate, i - 1) // 第i年的容量衰减系数
+    const yearNet = (grossBefore * degradation * p.revenueShare - opexAnnual) // 第i年净收益
     cumulative += yearNet
     if (cumulative >= capex && paybackYear === 0) {
-      paybackYear = i
+      paybackYear = i // 记录回收期年份
     }
   }
   const payback = paybackYear > 0 ? paybackYear : '-'
 
+  // 计算10年累计净收益
   let tenYearCum = 0
   for (let i = 1; i <= 10; i++) {
     const degradation = Math.pow(1 - p.degradationRate, i - 1)
     tenYearCum += (grossBefore * degradation * p.revenueShare - opexAnnual)
   }
 
-    //银行借款比例   
-  const loanAmount = capex * p.loanRatio
+  // 计算贷款相关
+  const loanAmount = capex * p.loanRatio // 贷款金额
+  // 等额本息还款公式计算年还款额
   const loanPayment = loanAmount > 0 ? (loanAmount * p.loanRate * Math.pow(1 + p.loanRate, p.loanTerm)) / (Math.pow(1 + p.loanRate, p.loanTerm) - 1) : 0
   
-  let npv = -capex * (1 - p.loanRatio)
+  // 计算净现值NPV
+  let npv = -capex * (1 - p.loanRatio) // 初始投资（自有资金部分）
   for (let i = 1; i <= 10; i++) {
     const degradation = Math.pow(1 - p.degradationRate, i - 1)
-    const fcf = (grossBefore * degradation * p.revenueShare - opexAnnual - loanPayment)
-    npv += fcf / Math.pow(1 + p.discountRate, i)
+    const fcf = (grossBefore * degradation * p.revenueShare - opexAnnual - loanPayment) // 第i年自由现金流
+    npv += fcf / Math.pow(1 + p.discountRate, i) // 折现到当前价值
   }
   
+  // 计算内部收益率IRR
   const irr = calculateIRR(capex * (1 - p.loanRatio), grossBefore, p.revenueShare, opexAnnual, loanPayment, p.degradationRate, p.loanTerm)
   
+  // 计算10年投资回报率ROI
   const roi10 = (tenYearCum / capex) * 100
   
+  // 计算套利覆盖率
   const coverageRate = (dailyArbitrage / dailyPeakKWh * 100)
   
+  // 返回所有计算结果
   return {
     grossBefore: grossBefore.toFixed(2),
     dailyGross: dailyGross.toFixed(2),
@@ -138,33 +157,42 @@ const calcResults = computed(() => {
   }
 })
 
+// 计算内部收益率IRR（二分法迭代求解）
 function calculateIRR(initialInvestment, grossBefore, share, opex, loanPayment, degradation, term) {
-  let irr = 0.1
+  let irr = 0.1 // 初始猜测值10%
   let npv = -initialInvestment
+  
+  // 计算初始猜测值对应的NPV
   for (let i = 1; i <= term; i++) {
-    const deg = Math.pow(1 - degradation, i - 1)
-    const fcf = (grossBefore * deg * share - opex - loanPayment)
+    const deg = Math.pow(1 - degradation, i - 1) // 容量衰减系数
+    const fcf = (grossBefore * deg * share - opex - loanPayment) // 自由现金流
     npv += fcf / Math.pow(1 + irr, i)
   }
   
+  // 如果NPV为正，说明IRR高于初始猜测值，使用二分法寻找正确值
   if (npv > 0) {
-    let high = 0.5, low = 0
-    for (let i = 0; i < 50; i++) {
-      irr = (low + high) / 2
+    let high = 0.5, low = 0 // 搜索范围0%-50%
+    for (let i = 0; i < 50; i++) { // 最多迭代50次
+      irr = (low + high) / 2 // 取中间值
       npv = -initialInvestment
+      
+      // 计算当前irr对应的NPV
       for (let j = 1; j <= term; j++) {
         const deg = Math.pow(1 - degradation, j - 1)
         const fcf = (grossBefore * deg * share - opex - loanPayment)
         npv += fcf / Math.pow(1 + irr, j)
       }
-      if (npv > 0) low = irr
-      else high = irr
+      
+      // 调整搜索范围
+      if (npv > 0) low = irr // NPV为正，说明IRR更高
+      else high = irr // NPV为负，说明IRR更低
     }
   }
   
-  return irr * 100
+  return irr * 100 // 转换为百分比返回
 }
 
+// 投资成本结构占比计算
 const equipmentPercent = computed(() => {
   const capex = parseFloat(calcResults.value.capex)
   const equipment = parseFloat(calcResults.value.equipmentCost)
@@ -181,6 +209,7 @@ const designPercent = computed(() => {
   return ((designCostWan.value / capex) * 100).toFixed(0)
 })
 
+// 收益分配占比计算
 const wfGrossAPercent = computed(() => {
   return (revenueShare.value).toFixed(0)
 })
@@ -191,6 +220,7 @@ const wfNetAPercent = computed(() => {
   return ((net / gross) * 100).toFixed(2)
 })
 
+// 页面展开/折叠状态管理
 const expandedSections = ref({
   sec1: true,
   sec2: true,
@@ -200,78 +230,83 @@ const expandedSections = ref({
   sec6: true
 })
 
+// 切换章节展开/折叠状态
 const toggleSection = (sec) => {
   expandedSections.value[sec] = !expandedSections.value[sec]
 }
 
+// 敏感性分析数据：生成不同分成比例和价差组合下的收益矩阵
 const sensitivityData = computed(() => {
   const p = calcParams.value
-  const shareValues = [90, 85, 80, 75, 70]
-  const priceDiffValues = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1]
+  const shareValues = [90, 85, 80, 75, 70] // 分成比例选项
+  const priceDiffValues = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1] // 价差选项
   
   return shareValues.map(share => ({
     share,
     rows: priceDiffValues.map(diff => {
       const dailyArbitrage = Math.min((p.monthlyKWh * (p.superPeakRate + p.peakRate)) / 30, p.unitCapacityKWh * p.efficiency)
       const annualArbitrage = dailyArbitrage * diff * p.operatingDays / 10000
-      const value = (annualArbitrage * share / 100).toFixed(1)
-      const isCurrent = share === p.revenueShare * 100 && diff === p.priceDiff
+      const value = (annualArbitrage * share / 100).toFixed(1) // 计算对应收益
+      const isCurrent = share === p.revenueShare * 100 && diff === p.priceDiff // 是否为当前选中值
       return { diff, value, isCurrent }
     })
   }))
 })
 
+// 获取敏感性分析热图背景色（收益越高颜色越绿）
 const getHeatmapColor = (value) => {
   const val = parseFloat(value)
-  if (val < 8) return 'rgba(217,89,23,0.88)'
-  if (val < 10) return 'rgba(239,125,20,0.88)'
-  if (val < 12) return 'rgba(249,158,11,0.88)'
-  if (val < 14) return 'rgba(217,179,38,0.88)'
-  if (val < 16) return 'rgba(163,184,38,0.88)'
-  if (val < 18) return 'rgba(107,185,69,0.88)'
-  return 'rgba(16,185,129,0.88)'
+  if (val < 8) return 'rgba(217,89,23,0.88)' // 低收益：红色
+  if (val < 10) return 'rgba(239,125,20,0.88)' // 较低收益：橙红色
+  if (val < 12) return 'rgba(249,158,11,0.88)' // 中等收益：橙色
+  if (val < 14) return 'rgba(217,179,38,0.88)' // 中高收益：黄色
+  if (val < 16) return 'rgba(163,184,38,0.88)' // 较高收益：黄绿色
+  if (val < 18) return 'rgba(107,185,69,0.88)' // 高收益：绿色
+  return 'rgba(16,185,129,0.88)' // 极高收益：深绿色
 }
 
+// 获取敏感性分析热图文字颜色（根据背景色自动调整）
 const getHeatmapTextColor = (value) => {
-  return parseFloat(value) < 11 ? '#fff' : '#0F1724'
+  return parseFloat(value) < 11 ? '#fff' : '#0F1724' // 低收益用白色文字，高收益用深色文字
 }
 
+// 现金流数据：生成10年的年度净收益和累计净收益
 const cashflowData = computed(() => {
   const p = calcParams.value
   const grossBefore = parseFloat(calcResults.value.grossBefore)
   const opex = parseFloat(calcResults.value.opexAnnual)
   const data = []
-  let cumulative = -parseFloat(calcResults.value.capex)
+  let cumulative = -parseFloat(calcResults.value.capex) // 初始投资为负
   
   for (let i = 1; i <= 10; i++) {
-    const degradation = Math.pow(1 - p.degradationRate, i - 1)
-    const yearNet = grossBefore * degradation * p.revenueShare - opex
-    cumulative += yearNet
+    const degradation = Math.pow(1 - p.degradationRate, i - 1) // 容量衰减系数
+    const yearNet = grossBefore * degradation * p.revenueShare - opex // 第i年净收益
+    cumulative += yearNet // 累计净收益
     data.push({ year: i, net: yearNet.toFixed(2), cumulative: cumulative.toFixed(2) })
   }
   return data
 })
 
+// 监听两充两放月份数变化，动态启用/禁用额外价差输入
 watch(m2Months, (val) => {
-  const inputs = document.querySelectorAll('.inp-field')
   const priceDiff2Input = document.querySelector('#inp_priceDiff2')
   const unitPriceDiff2 = document.querySelector('#unit_priceDiff2')
   const hintPriceDiff2 = document.querySelector('#hint_priceDiff2')
   
   if (val > 0) {
-    priceDiff2Input?.removeAttribute('disabled')
-    unitPriceDiff2?.classList.remove('disabled')
+    priceDiff2Input?.removeAttribute('disabled') // 启用输入
+    unitPriceDiff2?.classList.remove('disabled') // 启用单位显示
     hintPriceDiff2?.style.setProperty('color', 'var(--text3)')
   } else {
-    priceDiff2Input?.setAttribute('disabled', 'disabled')
-    unitPriceDiff2?.classList.add('disabled')
+    priceDiff2Input?.setAttribute('disabled', 'disabled') // 禁用输入
+    unitPriceDiff2?.classList.add('disabled') // 禁用单位显示
     hintPriceDiff2?.style.setProperty('color', 'var(--text3)')
   }
 })
 </script>
 
 <template>
-  <div :class="{ light: !isDark }">
+  <div :class="['app-container', { light: !isDark }]">
     <div class="topbar">
       <div class="topbar-inner">
         <div class="topbar-icon">
@@ -1027,7 +1062,7 @@ watch(m2Months, (val) => {
 </template>
 
 <style>
-:root {
+.app-container {
   --bg:#0B1120;--bg2:#0E1628;--card:#14213A;--card2:#182845;
   --border:#253D62;--border2:#1E3050;
   --blue:#3B82F6;--cyan:#06B6D4;--purple:#8B5CF6;
@@ -1040,7 +1075,7 @@ watch(m2Months, (val) => {
   --content-max:1240px;
   --col-left-w:420px;
 }
-body.light {
+.app-container.light {
   --bg:#EEF3FF;--bg2:#E2EAF8;--card:#FFFFFF;--card2:#F4F8FF;
   --border:#C4D2EC;--border2:#D0DCF2;
   --text:#0F1828;--text2:#2E456E;--text3:#6278A0;
@@ -1050,15 +1085,15 @@ body.light {
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
 html,body{height:100%;overflow-x:hidden;}
-body{font-family:'Noto Sans SC',sans-serif;background:var(--bg);color:var(--text);font-size:14px;transition:background .3s,color .3s;}
+.app-container{font-family:'Noto Sans SC',sans-serif;background:var(--bg);color:var(--text);font-size:14px;transition:background .3s,color .3s;min-height:100vh;}
 ::-webkit-scrollbar{width:4px;height:4px;}
 ::-webkit-scrollbar-track{background:var(--bg2);}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
 
 .topbar{position:fixed;top:0;left:0;right:0;height:var(--header-h);z-index:100;
   background:rgba(11,17,32,0.97);border-bottom:1px solid var(--border);
-  backdrop-filter:blur(12px);}
-body.light .topbar{background:rgba(238,243,255,0.96);}
+  backdrop-filter:blur(12px);transition:background .3s;}
+.app-container.light .topbar{background:rgba(238,243,255,0.96);}
 .topbar-inner{max-width:var(--content-max);margin:0 auto;height:100%;
   display:flex;align-items:center;padding:0 14px;gap:10px;}
 .topbar-icon{width:34px;height:34px;background:linear-gradient(135deg,#1D3B7A,var(--cyan));
@@ -1215,8 +1250,8 @@ body.light .topbar{background:rgba(238,243,255,0.96);}
 .wf-arrow{font-size:10px;color:var(--text3);text-align:center;margin:1px 0;padding-left:80px;}
 .bar-notes{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;}
 .bar-note{font-size:10px;color:var(--text3);background:rgba(255,255,255,0.03);
-  border:1px solid var(--border2);border-radius:6px;padding:3px 8px;}
-body.light .bar-note{background:rgba(0,0,0,0.03);}
+  border:1px solid var(--border2);border-radius:6px;padding:3px 8px;transition:background .3s;}
+.app-container.light .bar-note{background:rgba(0,0,0,0.03);}
 .bar-note span{color:var(--text2);font-family:'Exo 2',sans-serif;font-weight:600;}
 
 .fin-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px;}
@@ -1234,8 +1269,8 @@ body.light .bar-note{background:rgba(0,0,0,0.03);}
 .fin-table{width:100%;border-collapse:collapse;font-size:11px;min-width:460px;}
 .fin-table th{text-align:left;padding:8px 10px;
   background:rgba(42,58,85,0.25);color:var(--text3);font-weight:500;font-size:10px;
-  border-bottom:1px solid var(--border2);white-space:nowrap;}
-body.light .fin-table th{background:rgba(180,200,235,0.25);}
+  border-bottom:1px solid var(--border2);white-space:nowrap;transition:background .3s;}
+.app-container.light .fin-table th{background:rgba(180,200,235,0.25);}
 .fin-table td{padding:9px 10px;border-bottom:1px solid var(--border2);color:var(--text2);}
 .fin-table tr:last-child td{border-bottom:none;}
 .fin-table td:first-child{color:var(--text3);font-size:10px;white-space:nowrap;}
@@ -1250,8 +1285,8 @@ body.light .fin-table th{background:rgba(180,200,235,0.25);}
 .dscr-sub{font-size:10px;color:var(--text3);}
 .dscr-no-loan{height:80px;display:flex;flex-direction:column;align-items:center;justify-content:center;
   gap:6px;color:var(--text3);font-size:11px;
-  background:rgba(255,255,255,0.02);border:1px dashed var(--border2);border-radius:8px;}
-body.light .dscr-no-loan{background:rgba(0,0,0,0.02);}
+  background:rgba(255,255,255,0.02);border:1px dashed var(--border2);border-radius:8px;transition:background .3s;}
+.app-container.light .dscr-no-loan{background:rgba(0,0,0,0.02);}
 
 .hm-sec{padding:14px;}
 .hm-title{font-family:'Exo 2',sans-serif;font-size:13px;font-weight:700;color:var(--text);margin-bottom:3px;}
@@ -1267,8 +1302,8 @@ body.light .dscr-no-loan{background:rgba(0,0,0,0.02);}
   font-weight:500;font-family:'Exo 2',sans-serif;}
 .hm-table td{padding:5px 3px;text-align:center;font-size:11px;font-family:'Exo 2',sans-serif;
   font-weight:600;cursor:default;border-radius:4px;min-width:42px;}
-.hm-table td.cur{outline:2px solid rgba(255,255,255,0.9);outline-offset:-1px;position:relative;z-index:3;}
-body.light .hm-table td.cur{outline-color:#1E40AF;}
+.hm-table td.cur{outline:2px solid rgba(255,255,255,0.9);outline-offset:-1px;position:relative;z-index:3;transition:outline-color .3s;}
+.app-container.light .hm-table td.cur{outline-color:#1E40AF;}
 .cur-dot{display:inline-block;width:5px;height:5px;background:var(--blue);
   border-radius:50%;vertical-align:super;margin-left:1px;}
 
